@@ -1,0 +1,82 @@
+{
+  "name": "quanta-pc-extension",
+  "displayName": "Quanta PC Extension",
+  "description": "Connects local VS Code with Quanta IDE on Google Drive",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "quanta.push",
+        "title": "Quanta: Push to Google Drive"
+      },
+      {
+        "command": "quanta.pull",
+        "title": "Quanta: Pull from Google Drive"
+      },
+      {
+        "command": "quanta.syncChats",
+        "title": "Quanta: Sync Antigravity Chats"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "quanta-sidebar",
+          "title": "Quanta IDE",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "quanta-sidebar": [
+        {
+          "type": "webview",
+          "id": "quanta-sidebar-view",
+          "name": "Quanta Panel"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Quanta PC Extension",
+      "properties": {
+        "quanta.clientId": {
+          "type": "string",
+          "default": "",
+          "description": "Google Drive OAuth Client ID"
+        },
+        "quanta.clientSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Google Drive OAuth Client Secret"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "test-compile": "tsc -p .",
+    "test-watch": "tsc -p . -w"
+  },
+  "devDependencies": {
+    "@types/node": "18.x",
+    "@types/vscode": "^1.80.0",
+    "ts-loader": "^9.4.4",
+    "typescript": "^5.1.3",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "googleapis": "^126.0.1"
+  }
+}

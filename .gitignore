@@ -1,0 +1,69 @@
+# ===================================================================
+# Quanta IDE - Root .gitignore
+# Prevents accidental commits of secrets, credentials, build artifacts, and logs.
+# ===================================================================
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Google OAuth Credentials & Service Account files
+client_secret*.json
+*.apps.googleusercontent.com.json
+!client_secret.example.json
+
+# SSL Keys & Certificates
+certs/
+*.key
+*.pem
+*.cert
+*.crt
+
+# Node dependencies
+node_modules/
+package-lock.json.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs, compiled distributions & package bundles
+dist/
+build/
+out/
+bin/
+*.vsix
+*.apk
+*.aab
+
+# Logs & Tunnel outputs
+*.log
+*_log.txt
+logs/
+cloudflared_log.txt
+server_log.txt
+
+# Personal Chat Transcripts & History
+antigravity_chats.json
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+pyvenv.cfg
+__pycache__/
+*.pyc
+
