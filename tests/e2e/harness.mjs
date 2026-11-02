@@ -463,15 +463,16 @@ export function resolveJailedPath(workspaceRoot, relativePath) {
   }
 
   // Detect URL-encoded traversals
-  const decoded = decodeURIComponent(relativePath);
-  const rootResolved = path.resolve(workspaceRoot);
-  const resolved = path.resolve(rootResolved, decoded);
+  const decoded = decodeURIComponent(relativePath).replace(/\\/g, '/');
+  const pathApi = /^[a-z]:[\\/]/i.test(workspaceRoot) ? path.win32 : path;
+  const rootResolved = pathApi.resolve(workspaceRoot);
+  const resolved = pathApi.resolve(rootResolved, decoded);
 
-  if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+  if (!resolved.startsWith(rootResolved + pathApi.sep) && resolved !== rootResolved) {
     throw new Error(`Path traversal rejected: Attempt to access outside workspace root: ${relativePath}`);
   }
 
-  const filename = path.basename(resolved);
+  const filename = pathApi.basename(resolved);
   if (filename.startsWith('.env') || filename === 'client_secret.json' || filename.endsWith('.pem') || filename.endsWith('.key')) {
     throw new Error(`Access denied: Sensitive file pattern blocked: ${filename}`);
   }
