@@ -1,0 +1,12 @@
+{
+  "name": "quanta-ide-workspace",
+  "private": true,
+  "scripts": {
+    "start": "node Remote-Control/server.js",
+    "setup": "node Remote-Control/setup.js",
+    "doctor": "node Remote-Control/doctor.js",
+    "test": "npm --prefix Remote-Control test && npm --prefix Quanta-PC-Extension test",
+    "test:scenarios": "node tests/e2e/runner.mjs",
+    "check": "npm --prefix Quanta-PC-Extension run test-compile"
+  }
+}

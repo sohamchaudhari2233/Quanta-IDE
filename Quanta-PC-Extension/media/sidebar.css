@@ -1,0 +1,209 @@
+/* ==========================================================================
+   QUANTA IDE — SIDEBAR WEBVIEW "INK & PAPER" STYLESHEET
+   Respects VS Code Theme Variables, Hairline Rules, Ledger Alignment
+   ========================================================================== */
+
+:root {
+  --font-serif: 'Literata', 'Georgia', serif;
+  --font-sans: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --font-mono: var(--vscode-editor-font-family, 'JetBrains Mono', Consolas, monospace);
+
+  --bg: var(--vscode-sideBar-background);
+  --surface: var(--vscode-editor-background);
+  --surface-sunken: var(--vscode-sideBarSectionHeader-background, rgba(0, 0, 0, 0.15));
+  --text: var(--vscode-foreground);
+  --text-2: var(--vscode-descriptionForeground);
+  --rule: var(--vscode-sideBarSectionHeader-border, rgba(255, 255, 255, 0.1));
+  --rule-strong: var(--vscode-focusBorder, rgba(255, 255, 255, 0.2));
+
+  --accent: var(--vscode-button-background, #1F1D1A);
+  --accent-text: var(--vscode-button-foreground, #FBF8F1);
+  --accent-hover: var(--vscode-button-hoverBackground, #38342E);
+
+  --signal: #E0705A;
+  --signal-subtle: rgba(224, 112, 90, 0.15);
+  --ok: #8DB071;
+  --ok-subtle: rgba(141, 176, 113, 0.15);
+  --caution: #D9A441;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--text);
+  background-color: var(--bg);
+  margin: 0;
+  padding: 12px 14px 24px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--rule-strong);
+  margin-bottom: 14px;
+}
+
+.brand-title {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.health-stamp {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  background: var(--ok-subtle);
+  transition: all 0.2s ease;
+}
+
+/* Dynamic Composite Health Stamp Variations */
+.health-stamp.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-subtle);
+}
+
+.health-stamp.caution {
+  border-color: var(--caution);
+  color: var(--caution);
+  background: rgba(217, 164, 65, 0.15);
+}
+
+.health-stamp.offline {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: var(--signal-subtle);
+}
+
+/* Sections */
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+/* Buttons */
+button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--rule-strong);
+}
+
+button.secondary:hover {
+  background: var(--surface-sunken);
+  border-color: var(--text);
+}
+
+button.text-action {
+  background: transparent;
+  color: var(--text-2);
+  border: none;
+  padding: 3px 6px;
+  font-size: 11px;
+  width: auto;
+}
+
+button.text-action:hover {
+  color: var(--signal);
+  text-decoration: underline;
+}
+
+button svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+/* Ledger Status Rows */
+.ledger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.ledger-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11.5px;
+}
+
+.ledger-key {
+  color: var(--text-2);
+}
+
+.ledger-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+/* Footer Version */
+.version-footer {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+

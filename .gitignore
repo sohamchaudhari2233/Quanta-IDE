@@ -8,6 +8,13 @@
 .env.*
 !.env.example
 !.env.*.example
+API keys
+API keys*
+*api*key*
+*API*key*
+devices.json
+.quanta/
+.agents/
 
 # Google OAuth Credentials & Service Account files
 client_secret*.json
@@ -47,6 +54,8 @@ server_log.txt
 
 # Personal Chat Transcripts & History
 antigravity_chats.json
+data/
+Remote-Control/data/
 
 # Operating System & IDE
 .DS_Store
@@ -66,4 +75,3 @@ env/
 pyvenv.cfg
 __pycache__/
 *.pyc
-

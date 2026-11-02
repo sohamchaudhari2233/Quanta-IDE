@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import 'dotenv/config';
+import './core/environment.js';
 import express from 'express';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
@@ -10,9 +10,29 @@ import fs from 'fs';
 import os from 'os';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import path, { dirname, join } from 'path';
+import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { parseMultipart } from './ide/multipart.js';
 import { inspectUI } from './ui_inspector.js';
 import { execSync } from 'child_process';
+import { RateLimiter, getClientIp } from './security/rateLimiter.js';
+import { timingSafeEqualString, validatePasswordSecurity, TotpEngine, SessionManager } from './security/sessionManager.js';
+import { auditLogger } from './security/auditLogger.js';
+import { verifyCdpSecurity } from './security/cdpCheck.js';
+import { eventBus } from './core/eventBus.js';
+import { approvalManager } from './agent/approvalManager.js';
+import { taskQueue } from './agent/taskQueue.js';
+import { checkpointManager } from './agent/checkpoints.js';
+import { fileBrowser } from './ide/fileBrowser.js';
+import { quickActionRunner } from './ide/quickActions.js';
+import { imageUploader } from './ide/imageUpload.js';
+import { telegramBot } from './notifications/telegramBot.js';
+import { webhookDispatcher } from './webhooks/webhookDispatcher.js';
+import { pluginHost } from './plugins/pluginHost.js';
+import { tunnelSupervisor } from './connectivity/tunnelSupervisor.js';
+import { canUseDemoLogin } from './security/demoAccess.js';
+import { isLocalRequest, isSameOrigin, asyncRoute, apiErrorHandler } from './security/requestPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,11 +68,35 @@ function findAntigravityPort() {
     return [9000, 9001, 9002, 9003];
 }
 
-const PORTS = findAntigravityPort();
+const PORTS = process.env.CDP_PORT ? [Number(process.env.CDP_PORT)] : findAntigravityPort();
 const POLL_INTERVAL = 500;
-const SERVER_PORT = process.env.PORT || 3000;
+const SERVER_PORT = Number(process.env.PORT || 3000);
 const APP_PASSWORD = process.env.APP_PASSWORD || 'antigravity';
+const SESSION_SECRET = process.env.SESSION_SECRET && !/^your-|^antigravity_secret_key_1337$/.test(process.env.SESSION_SECRET)
+    ? process.env.SESSION_SECRET : randomBytes(32).toString('hex');
+if (!Number.isInteger(SERVER_PORT) || SERVER_PORT < 1 || SERVER_PORT > 65535) throw new Error('PORT must be an integer from 1 to 65535');
+if (!validatePasswordSecurity(APP_PASSWORD, true).valid) throw new Error('Configure a strong APP_PASSWORD first: run npm run setup');
 const AUTH_COOKIE_NAME = 'ag_auth_token';
+const rateLimiter = new RateLimiter({ maxAttempts: 5, lockoutDurationMs: 15 * 60 * 1000 });
+const sessionManager = new SessionManager({
+    requirePairing: process.env.REQUIRE_DEVICE_PAIRING === 'true',
+    allowLanAutoTrust: process.env.ALLOW_LAN_AUTO_TRUST === 'true'
+});
+
+telegramBot.setManagers({ approvalManager, taskQueue });
+pluginHost.setQuickActionRegistrar(quickActionRunner);
+
+// Read-Only vs Control Mode Enforcer Middleware
+const requireControlMode = (req, res, next) => {
+    const session = req.session;
+    if (!session || session.mode !== 'control') {
+        return res.status(403).json({
+            error: 'Action disallowed: Session is in read-only mode. Please elevate to control mode.',
+            mode: 'read-only'
+        });
+    }
+    next();
+};
 
 // Security warning for default credentials
 if (APP_PASSWORD === 'antigravity') {
@@ -68,44 +112,6 @@ let AUTH_TOKEN = null;
 let cdpConnection = null;
 let lastSnapshot = null;
 let lastSnapshotHash = null;
-
-// Kill any existing process on the server port (prevents EADDRINUSE)
-function killPortProcess(port) {
-    try {
-        if (process.platform === 'win32') {
-            // Windows: Find PID using netstat and kill it
-            const result = execSync(`netstat -ano | findstr :${port} | findstr LISTENING`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-            const lines = result.trim().split('\n');
-            const pids = new Set();
-            for (const line of lines) {
-                const parts = line.trim().split(/\s+/);
-                const pid = parts[parts.length - 1];
-                if (pid && pid !== '0') pids.add(pid);
-            }
-            for (const pid of pids) {
-                try {
-                    execSync(`taskkill /PID ${pid} /F`, { stdio: 'pipe' });
-                    console.log(`⚠️  Killed existing process on port ${port} (PID: ${pid})`);
-                } catch (e) { /* Process may have already exited */ }
-            }
-        } else {
-            // Linux/macOS: Use lsof and kill
-            const result = execSync(`lsof -ti:${port}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-            const pids = result.trim().split('\n').filter(p => p);
-            for (const pid of pids) {
-                try {
-                    execSync(`kill -9 ${pid}`, { stdio: 'pipe' });
-                    console.log(`⚠️  Killed existing process on port ${port} (PID: ${pid})`);
-                } catch (e) { /* Process may have already exited */ }
-            }
-        }
-        // Small delay to let the port be released
-        return new Promise(resolve => setTimeout(resolve, 500));
-    } catch (e) {
-        // No process found on port - this is fine
-        return Promise.resolve();
-    }
-}
 
 // Get local IP address for mobile access
 // Prefers real network IPs (192.168.x.x, 10.x.x.x) over virtual adapters (172.x.x.x from WSL/Docker)
@@ -137,13 +143,15 @@ function getLocalIP() {
 // Helper: HTTP GET JSON
 function getJson(url) {
     return new Promise((resolve, reject) => {
-        http.get(url, (res) => {
+        const req = http.get(url, { timeout: 2000 }, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
             });
-        }).on('error', reject);
+        });
+        req.on('error', reject);
+        req.on('timeout', () => req.destroy(new Error('CDP discovery timed out')));
     });
 }
 
@@ -151,7 +159,7 @@ function getJson(url) {
 // Find Antigravity CDP endpoint
 async function discoverCDP() {
     const errors = [];
-    const portsList = findAntigravityPort();
+    const portsList = PORTS;
     for (const port of portsList) {
         try {
             const list = await getJson(`http://127.0.0.1:${port}/json/list`);
@@ -737,44 +745,50 @@ async function stopGeneration(cdp) {
     return { error: 'Context failed' };
 }
 
-// Click Element (Remote)
+// Click Element (Remote) - Sanitized against CDP script injection
 async function clickElement(cdp, { selector, index, textContent }) {
-    const safeText = JSON.stringify(textContent || '');
+    if (!selector || typeof selector !== 'string') {
+        return { error: 'Invalid selector: must be a non-empty string' };
+    }
+
+    const safeSelector = JSON.stringify(selector);
+    const targetIndex = Number.isInteger(Number(index)) ? Math.max(0, parseInt(index, 10)) : 0;
+    const safeText = JSON.stringify(typeof textContent === 'string' ? textContent : '');
 
     const EXP = `(async () => {
         try {
+            const selectorStr = ${safeSelector};
+            const targetIndex = ${targetIndex};
+            const filterText = ${safeText};
+
             // Priority: Search inside the chat container first for better accuracy
             const root = document.getElementById('conversation') || document.getElementById('chat') || document.getElementById('cascade') || document;
             
-            // Strategy: Find all elements matching the selector
-            let elements = Array.from(root.querySelectorAll('${selector}'));
+            // Strategy: Find all elements matching the selector safely
+            let elements = Array.from(root.querySelectorAll(selectorStr));
             
-            const filterText = ${safeText};
             if (filterText) {
                 elements = elements.filter(el => {
                     const txt = (el.innerText || el.textContent || '').trim();
                     const firstLine = txt.split('\\n')[0].trim();
-                    // Match if first line matches (thought blocks) or if it contains the label (buttons)
                     return firstLine === filterText || txt.includes(filterText);
                 });
                 
-                // CRITICAL: If elements are nested (e.g. <div><span>Text</span></div>), 
-                // both will match. We only want the most specific (inner-most) one.
+                // CRITICAL: If elements are nested, keep only the most specific (inner-most) one
                 elements = elements.filter(el => {
                     return !elements.some(other => other !== el && el.contains(other));
                 });
             }
 
-            const target = elements[${index}];
+            const target = elements[targetIndex];
 
             if (target) {
-                // Focus and Click
                 if (target.focus) target.focus();
                 target.click();
-                return { success: true, found: elements.length, indexUsed: ${index} };
+                return { success: true, found: elements.length, indexUsed: targetIndex };
             }
             
-            return { error: 'Element not found at index ' + ${index} + ' among ' + elements.length + ' matches' };
+            return { error: 'Element not found at index ' + targetIndex + ' among ' + elements.length + ' matches' };
         } catch(e) {
             return { error: e.toString() };
         }
@@ -789,17 +803,24 @@ async function clickElement(cdp, { selector, index, textContent }) {
                 contextId: ctx.id
             });
             if (res.result?.value?.success) return res.result.value;
-            // If we found it but click didn't return success (unlikely with this script), continue to next context
         } catch (e) { }
     }
     return { error: 'Click failed in all contexts or element not found at index' };
 }
 
-// Remote scroll - sync phone scroll to desktop
+// Remote scroll - sync phone scroll to desktop (Sanitized against CDP script injection)
 async function remoteScroll(cdp, { scrollTop, scrollPercent }) {
-    // Try to scroll the chat container in Antigravity
+    const hasPercent = scrollPercent !== undefined && scrollPercent !== null && Number.isFinite(Number(scrollPercent));
+    const safePercent = hasPercent ? Math.min(Math.max(Number(scrollPercent), 0), 1) : null;
+    const safeScrollTop = (scrollTop !== undefined && scrollTop !== null && Number.isFinite(Number(scrollTop)))
+        ? Math.max(0, Number(scrollTop))
+        : 0;
+
     const EXPRESSION = `(async () => {
         try {
+            const percent = ${JSON.stringify(safePercent)};
+            const topVal = ${JSON.stringify(safeScrollTop)};
+
             // Find the main scrollable chat container
             const scrollables = [...document.querySelectorAll('#conversation [class*="scroll"], #chat [class*="scroll"], #cascade [class*="scroll"], #conversation [style*="overflow"], #chat [style*="overflow"], #cascade [style*="overflow"]')]
                 .filter(el => el.scrollHeight > el.clientHeight);
@@ -809,7 +830,6 @@ async function remoteScroll(cdp, { scrollTop, scrollPercent }) {
             if (chatArea) scrollables.unshift(chatArea);
             
             if (scrollables.length === 0) {
-                // Fallback: scroll the main container element
                 const cascade = document.getElementById('conversation') || document.getElementById('chat') || document.getElementById('cascade');
                 if (cascade && cascade.scrollHeight > cascade.clientHeight) {
                     scrollables.push(cascade);
@@ -820,12 +840,12 @@ async function remoteScroll(cdp, { scrollTop, scrollPercent }) {
             
             const target = scrollables[0];
             
-            // Use percentage-based scrolling for better sync
-            if (${scrollPercent} !== undefined) {
+            // Use percentage-based scrolling when provided, otherwise absolute pixel offset
+            if (percent !== null) {
                 const maxScroll = target.scrollHeight - target.clientHeight;
-                target.scrollTop = maxScroll * ${scrollPercent};
+                target.scrollTop = maxScroll * percent;
             } else {
-                target.scrollTop = ${scrollTop || 0};
+                target.scrollTop = topVal;
             }
             
             return { success: true, scrolled: target.scrollTop };
@@ -1490,10 +1510,14 @@ async function hasChatOpen(cdp) {
                           document.querySelector('.scrollbar-hide.px-4') ||
                           document.querySelector('[class*="scrollbar-hide"][class*="px-"]');
     const hasMessages = chatContainer && (chatContainer.querySelectorAll('[class*="message"], [data-message]').length > 0 || chatContainer.children.length > 0);
+    const stopBtn = document.querySelector('button svg.lucide-square')?.closest('button') ||
+                    document.querySelector('button[aria-label*="Stop"], button[title*="Stop"]');
+    const isExecuting = !!(stopBtn && stopBtn.offsetParent !== null);
     return {
         hasChat: !!chatContainer,
         hasMessages: hasMessages,
-        editorFound: !!(chatContainer && (chatContainer.querySelector('[data-lexical-editor="true"]') || document.querySelector('[contenteditable="true"]')))
+        editorFound: !!(chatContainer && (chatContainer.querySelector('[data-lexical-editor="true"]') || document.querySelector('[contenteditable="true"]'))),
+        isExecuting: isExecuting
     };
 })()`;
 
@@ -1829,33 +1853,9 @@ function hashString(str) {
     return hash.toString(36);
 }
 
-// Check if a request is from the same Wi-Fi (internal network)
-function isLocalRequest(req) {
-    // 1. Check for proxy headers (Cloudflare, ngrok, etc.)
-    // If these exist, the request is coming via an external tunnel/proxy
-    if (req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers['x-real-ip']) {
-        return false;
-    }
-
-    // 2. Check the remote IP address
-    const ip = req.ip || req.socket.remoteAddress || '';
-
-    // Standard local/private IPv4 and IPv6 ranges
-    return ip === '127.0.0.1' ||
-        ip === '::1' ||
-        ip === '::ffff:127.0.0.1' ||
-        ip.startsWith('192.168.') ||
-        ip.startsWith('10.') ||
-        ip.startsWith('172.16.') || ip.startsWith('172.17.') ||
-        ip.startsWith('172.18.') || ip.startsWith('172.19.') ||
-        ip.startsWith('172.2') || ip.startsWith('172.3') ||
-        ip.startsWith('::ffff:192.168.') ||
-        ip.startsWith('::ffff:10.');
-}
-
 // Initialize CDP connection
-async function initCDP() {
-    console.log('🔍 Discovering Antigravity CDP endpoint...');
+async function initCDP(quiet = false) {
+    if (!quiet) console.log('🔍 Discovering Antigravity CDP endpoint...');
     const cdpInfo = await discoverCDP();
     console.log(`✅ Found Antigravity on port ${cdpInfo.port} `);
 
@@ -1881,7 +1881,7 @@ async function startPolling(wss) {
                 cdpConnection = null;
             }
             try {
-                await initCDP();
+                await initCDP(true);
                 if (cdpConnection) {
                     console.log('✅ CDP Connection established from polling loop');
                     isConnecting = false;
@@ -1905,7 +1905,8 @@ async function startPolling(wss) {
 
                     // Broadcast to all connected clients
                     wss.clients.forEach(client => {
-                        if (client.readyState === WebSocket.OPEN) {
+                        if (client.isAuthenticated && client.readyState === WebSocket.OPEN &&
+                            (!client.session || sessionManager.getSession(client.session.id, false))) {
                             client.send(JSON.stringify({
                                 type: 'snapshot_update',
                                 timestamp: new Date().toISOString()
@@ -1963,17 +1964,40 @@ async function createServer() {
         server = http.createServer(app);
     }
 
-    const wss = new WebSocketServer({ server });
+    const wss = new WebSocketServer({
+        server,
+        verifyClient: (info, callback) => {
+            const ip = info.req.socket.remoteAddress || '127.0.0.1';
+            if (rateLimiter.isLocked(ip)) {
+                return callback(false, 429, 'Rate limited');
+            }
+            const origin = info.origin || info.req.headers.origin;
+            if (!isSameOrigin(info.req, origin)) {
+                auditLogger.log({ type: 'WS_ORIGIN_BLOCKED', ip, summary: 'Rejected cross-origin WebSocket' });
+                return callback(false, 403, 'Cross-Origin Forbidden');
+            }
+            callback(true);
+        }
+    });
 
     // Initialize Auth Token using a unique salt from environment
     const authSalt = process.env.AUTH_SALT || 'antigravity_default_salt_99';
     AUTH_TOKEN = hashString(APP_PASSWORD + authSalt);
 
     app.use(compression());
-    app.use(express.json());
+    app.use((req, res, next) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('Cache-Control', 'no-store');
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isSameOrigin(req, req.headers.origin)) {
+            return res.status(403).json({ error: 'Cross-origin request rejected' });
+        }
+        next();
+    });
+    app.use(express.json({ limit: '1mb' }));
 
     // Use a secure session secret from .env if available
-    const sessionSecret = process.env.SESSION_SECRET || 'antigravity_secret_key_1337';
+    const sessionSecret = SESSION_SECRET;
 
     if (sessionSecret === 'antigravity_secret_key_1337') {
         console.warn('\n\x1b[33m%s\x1b[0m', '⚠️  SECURITY WARNING: Using default SESSION_SECRET ("antigravity_secret_key_1337").');
@@ -1990,33 +2014,84 @@ async function createServer() {
 
     // Auth Middleware
     app.use((req, res, next) => {
-        const publicPaths = ['/login', '/login.html', '/favicon.ico'];
-        if (publicPaths.includes(req.path) || req.path.startsWith('/css/')) {
+        const publicPaths = ['/health', '/ssl-status', '/login', '/login.html', '/favicon.ico', '/manifest.webmanifest', '/sw.js', '/styleguide', '/styleguide.html'];
+        if (publicPaths.includes(req.path) || req.path.startsWith('/css/') || req.path.startsWith('/js/') || req.path.startsWith('/assets/')) {
             return next();
         }
 
-        // Exempt local Wi-Fi devices from authentication
-        if (isLocalRequest(req)) {
-            return next();
-        }
-
-        // Magic Link / QR Code Auto-Login
-        if (req.query.key === APP_PASSWORD) {
-            res.cookie(AUTH_COOKIE_NAME, AUTH_TOKEN, {
+        // Demo Mode (?demo=1) - strictly restricted to localhost / dev review
+        if (req.query.demo === '1' && canUseDemoLogin(req)) {
+            const clientIp = getClientIp(req);
+            const session = sessionManager.createSession({
+                ip: clientIp,
+                userAgent: req.headers['user-agent'] || '',
+                isLocal: true,
+                isTunnel: false
+            });
+            res.cookie(AUTH_COOKIE_NAME, session.id, {
                 httpOnly: true,
                 signed: true,
-                maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+                sameSite: 'strict',
+                secure: hasSSL,
+                maxAge: 24 * 60 * 60 * 1000
             });
-            // Remove the key from the URL by redirecting to the base path
-            return res.redirect('/');
-        }
-
-        const token = req.signedCookies[AUTH_COOKIE_NAME];
-        if (token === AUTH_TOKEN) {
+            req.session = session;
             return next();
         }
 
-        // If it's an API request, return 401, otherwise redirect to login
+        // Ephemeral One-Time Pairing Ticket Login (Replaces dangerous ?key= query string)
+        if (req.query.ticket) {
+            const isValidTicket = sessionManager.consumePairingTicket(req.query.ticket);
+            if (isValidTicket) {
+                const clientIp = getClientIp(req, process.env.TUNNEL_PROVIDER || 'auto');
+                const session = sessionManager.createSession({
+                    ip: clientIp,
+                    userAgent: req.headers['user-agent'] || '',
+                    isLocal: isLocalRequest(req),
+                    isTunnel: !isLocalRequest(req)
+                });
+                res.cookie(AUTH_COOKIE_NAME, session.id, {
+                    httpOnly: true,
+                    signed: true,
+                    sameSite: 'strict',
+                    secure: hasSSL,
+                    maxAge: 24 * 60 * 60 * 1000
+                });
+                auditLogger.log({ type: 'PAIRING_TICKET_LOGIN', ip: clientIp, deviceId: session.deviceFingerprint, summary: 'Logged in via ephemeral pairing ticket' });
+                return res.redirect('/');
+            } else {
+                auditLogger.log({ type: 'INVALID_PAIRING_TICKET', ip: getClientIp(req), summary: 'Attempted login with invalid/expired pairing ticket' });
+                return res.status(401).send('<h1>Pairing ticket is invalid or expired.</h1>');
+            }
+        }
+
+        const sessionId = req.signedCookies[AUTH_COOKIE_NAME];
+        const session = sessionManager.getSession(sessionId);
+
+        if (session) {
+            req.session = session;
+            return next();
+        }
+
+        // Configurable LAN Auto-Trust (Disabled by default for Zero-Trust compliance)
+        if (sessionManager.allowLanAutoTrust && isLocalRequest(req)) {
+            const clientIp = getClientIp(req);
+            const lanSession = sessionManager.createSession({
+                ip: clientIp,
+                userAgent: req.headers['user-agent'] || '',
+                isLocal: true,
+                isTunnel: false
+            });
+            res.cookie(AUTH_COOKIE_NAME, lanSession.id, {
+                httpOnly: true,
+                signed: true,
+                sameSite: 'strict',
+                maxAge: 24 * 60 * 60 * 1000
+            });
+            req.session = lanSession;
+            return next();
+        }
+
         const isApi = req.xhr || 
                       req.headers.accept?.includes('json') || 
                       req.path.startsWith('/snapshot') || 
@@ -2027,7 +2102,8 @@ async function createServer() {
                       req.path.startsWith('/set-model') ||
                       req.path.startsWith('/set-mode') ||
                       req.path.startsWith('/stop') ||
-                      req.path.startsWith('/upload-file');
+                      req.path.startsWith('/upload-file') ||
+                      req.path.startsWith('/api/');
         
         if (isApi) {
             res.status(401).json({ error: 'Unauthorized' });
@@ -2038,25 +2114,342 @@ async function createServer() {
 
     app.use(express.static(join(__dirname, 'public')));
 
-    // Login endpoint
+    // Secure Login endpoint with Rate Limiting and Constant-Time Authentication
     app.post('/login', (req, res) => {
-        const { password } = req.body;
-        if (password === APP_PASSWORD) {
-            res.cookie(AUTH_COOKIE_NAME, AUTH_TOKEN, {
+        const clientIp = getClientIp(req, process.env.TUNNEL_PROVIDER || 'auto');
+        if (rateLimiter.isLocked(clientIp)) {
+            const sec = rateLimiter.getRemainingLockoutSec(clientIp);
+            auditLogger.log({ type: 'LOCKOUT_REJECTED', ip: clientIp, summary: 'Login rejected: IP locked out' });
+            return res.status(429).json({ success: false, error: 'Too many failed login attempts. Locked out for ' + sec + ' seconds.' });
+        }
+
+        const { password, totp } = req.body;
+        const isPasswordCorrect = timingSafeEqualString(password, APP_PASSWORD);
+
+        // Optional TOTP 2FA Verification (RFC 6238)
+        if (isPasswordCorrect && process.env.ENABLE_TOTP === 'true') {
+            const totpSecret = process.env.TOTP_SECRET;
+            if (!totp) return res.status(401).json({ success: false, code: 'TOTP_REQUIRED', error: '2FA TOTP code required.' });
+            if (!totp || !TotpEngine.verifyToken(totp, totpSecret)) {
+                rateLimiter.recordFailure(clientIp);
+                auditLogger.log({ type: 'TOTP_FAILURE', ip: clientIp, summary: 'Invalid TOTP code provided' });
+                return res.status(401).json({ success: false, error: 'Invalid 2FA TOTP code.' });
+            }
+        }
+
+        if (isPasswordCorrect) {
+            const fingerprint = sessionManager.computeDeviceFingerprint(req);
+            if (sessionManager.requirePairing && !isLocalRequest(req) && !sessionManager.isDeviceApproved(fingerprint)) {
+                sessionManager.requestDevicePairing(fingerprint, req.headers['user-agent'] || '', clientIp);
+                return res.status(403).json({ success: false, error: 'Device pairing approval required on the desktop.' });
+            }
+            rateLimiter.recordSuccess(clientIp);
+            const session = sessionManager.createSession({
+                ip: clientIp,
+                userAgent: req.headers['user-agent'] || '',
+                isLocal: isLocalRequest(req),
+                isTunnel: !isLocalRequest(req),
+                deviceFingerprint: fingerprint
+            });
+
+            res.cookie(AUTH_COOKIE_NAME, session.id, {
                 httpOnly: true,
                 signed: true,
-                maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+                sameSite: 'strict',
+                secure: hasSSL,
+                maxAge: 24 * 60 * 60 * 1000
             });
-            res.json({ success: true });
+
+            auditLogger.log({ type: 'LOGIN_SUCCESS', ip: clientIp, deviceId: session.deviceFingerprint, summary: 'Login successful (Mode: ' + session.mode + ')' });
+            res.json({ success: true, mode: session.mode });
         } else {
-            res.status(401).json({ success: false, error: 'Invalid password' });
+            const outcome = rateLimiter.recordFailure(clientIp);
+            auditLogger.log({ type: 'LOGIN_FAILURE', ip: clientIp, summary: 'Failed password attempt' });
+            if (outcome.locked) {
+                return res.status(429).json({ success: false, error: 'Too many failed attempts. Locked out for ' + outcome.lockoutSec + ' seconds.' });
+            }
+            res.status(401).json({ success: false, error: 'Invalid password', attemptsRemaining: outcome.attemptsRemaining });
         }
     });
 
-    // Logout endpoint
+    // Logout endpoint with Server-Side Session Invalidation
     app.post('/logout', (req, res) => {
+        const sessionId = req.signedCookies[AUTH_COOKIE_NAME];
+        if (sessionId) {
+            sessionManager.destroySession(sessionId);
+        }
         res.clearCookie(AUTH_COOKIE_NAME);
         res.json({ success: true });
+    });
+
+    // Session Status & Elevation Endpoints
+    app.get('/api/session', (req, res) => {
+        const session = req.session;
+        const isTunnel = session ? session.isTunnel : !isLocalRequest(req);
+        const tunnelStatus = tunnelSupervisor ? tunnelSupervisor.getCurrentStatus() : {};
+        let connectionType = 'LAN';
+        if (isTunnel) {
+            const providerName = tunnelStatus.provider ? (tunnelStatus.provider.charAt(0).toUpperCase() + tunnelStatus.provider.slice(1)) : 'External';
+            connectionType = `Tunnel (${providerName})`;
+        }
+        res.json({
+            authenticated: !!session,
+            user: session?.user || 'Administrator',
+            mode: session ? session.mode : 'unauthenticated',
+            deviceFingerprint: session ? session.deviceFingerprint : null,
+            isLocal: session ? session.isLocal : isLocalRequest(req),
+            isTunnel: !!isTunnel,
+            connection: connectionType
+        });
+    });
+
+    app.post('/api/elevate', (req, res) => {
+        const { password, totp } = req.body;
+        const clientIp = getClientIp(req);
+        if (rateLimiter.isLocked(clientIp)) return res.status(429).json({ success: false, error: 'Too many attempts. Please wait.' });
+        if (!timingSafeEqualString(password, APP_PASSWORD) ||
+            (process.env.ENABLE_TOTP === 'true' && !TotpEngine.verifyToken(totp, process.env.TOTP_SECRET))) {
+            rateLimiter.recordFailure(clientIp);
+            auditLogger.log({ type: 'ELEVATE_FAILED', ip: clientIp, summary: 'Elevation attempt failed: wrong password' });
+            return res.status(401).json({ success: false, error: 'Invalid password or 2FA code' });
+        }
+        rateLimiter.recordSuccess(clientIp);
+        const sessionId = req.session.id;
+        sessionManager.elevateSession(sessionId, 30 * 60 * 1000); // 30 mins
+        auditLogger.log({ type: 'ELEVATE_SUCCESS', ip: clientIp, summary: 'Session elevated to control mode' });
+        res.json({ success: true, mode: 'control' });
+    });
+
+    app.post('/api/demote', (req, res) => {
+        const sessionId = req.session.id;
+        sessionManager.demoteSession(sessionId);
+        res.json({ success: true, mode: 'read-only' });
+    });
+
+    app.get('/api/audit-log', (req, res) => {
+        res.json(auditLogger.getRecentEntries(50));
+    });
+
+    // Approvals API
+    app.get('/api/approvals', (req, res) => {
+        res.json(approvalManager.getPending());
+    });
+
+    app.post('/api/approvals/:id/resolve', requireControlMode, (req, res) => {
+        const { decision, edits } = req.body;
+        try {
+            const resolved = approvalManager.resolve(req.params.id, decision, {
+                user: req.session?.user || 'mobile',
+                edits
+            });
+            res.json({ success: true, approval: resolved });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    });
+
+    // Task Queue API
+    app.get('/api/queue', (req, res) => {
+        res.json(taskQueue.getStatus());
+    });
+
+    app.post('/api/queue', requireControlMode, (req, res) => {
+        const { prompt, priority, idempotencyKey } = req.body;
+        try {
+            const task = taskQueue.enqueue({ prompt, priority, idempotencyKey, session: req.session });
+            res.json({ success: true, task });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    });
+
+    app.delete('/api/queue/:id', requireControlMode, (req, res) => {
+        const cancelled = taskQueue.cancel(req.params.id);
+        res.json({ success: cancelled });
+    });
+
+    // Timeline & Checkpoint API
+    app.get('/api/timeline', (req, res) => {
+        const limit = parseInt(req.query.limit, 10) || 50;
+        res.json(eventBus.getHistory(limit));
+    });
+
+    app.get('/api/checkpoints', asyncRoute(async (req, res) => {
+        const workspaceRoot = fileBrowser.workspaceRoot;
+        if (req.query.workspace && path.resolve(req.query.workspace) !== workspaceRoot) return res.status(400).json({ error: 'Workspace must match the active workspace' });
+        const limit = parseInt(req.query.limit, 10) || 20;
+        const list = await checkpointManager.listCheckpoints(workspaceRoot, limit);
+        res.json(list);
+    }));
+
+    // Sync Manifest Endpoint for Google Drive Cloud State Inspection (F-17)
+    app.get('/api/sync-manifest', (req, res) => {
+        try {
+            const candidatePaths = [
+                join(process.cwd(), '.quanta', 'sync-manifest.json'),
+                join(process.cwd(), '..', '.quanta', 'sync-manifest.json'),
+                join(__dirname, '..', '.quanta', 'sync-manifest.json')
+            ];
+            const manifestPath = candidatePaths.find(p => fs.existsSync(p));
+            if (manifestPath) {
+                try {
+                    const raw = fs.readFileSync(manifestPath, 'utf8');
+                    const data = JSON.parse(raw);
+                    const fileCount = data.files ? Object.keys(data.files).length : 0;
+                    return res.json({
+                        exists: true,
+                        status: 'synced',
+                        version: data.version || 1,
+                        workspaceName: data.workspaceName || 'quanta-ide',
+                        lastSyncTimestamp: data.lastSyncTimestamp || 0,
+                        fileCount,
+                        files: data.files || {}
+                    });
+                } catch (parseErr) {
+                    return res.json({
+                        exists: true,
+                        status: 'corrupt',
+                        error: 'Failed to parse sync-manifest.json: ' + parseErr.message,
+                        version: 1,
+                        workspaceName: 'quanta-ide',
+                        lastSyncTimestamp: 0,
+                        fileCount: 0,
+                        files: {}
+                    });
+                }
+            } else {
+                return res.json({
+                    exists: false,
+                    status: 'uninitialized',
+                    version: 1,
+                    workspaceName: 'quanta-ide',
+                    lastSyncTimestamp: 0,
+                    fileCount: 0,
+                    files: {}
+                });
+            }
+        } catch (e) {
+            res.status(500).json({ error: e.message, status: 'error' });
+        }
+    });
+
+    app.post('/api/checkpoints/rollback', requireControlMode, asyncRoute(async (req, res) => {
+        const { checkpointId, workspace: reqWorkspace } = req.body;
+        if (!checkpointId) {
+            return res.status(400).json({ success: false, error: 'checkpointId is required' });
+        }
+        const workspaceRoot = fileBrowser.workspaceRoot;
+        if (reqWorkspace && path.resolve(reqWorkspace) !== workspaceRoot) return res.status(400).json({ error: 'Workspace must match the active workspace' });
+        try {
+            const result = await checkpointManager.rollback(workspaceRoot, checkpointId, { user: req.session?.user || 'mobile' });
+            res.json({ success: true, result });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    }));
+
+    // Phone Mini-IDE File Endpoints
+    app.get('/api/files', (req, res) => {
+        try {
+            const list = fileBrowser.listDirectory(req.query.path || '');
+            res.json(list);
+        } catch (err) {
+            res.status(400).json({ error: err.message });
+        }
+    });
+
+    app.get('/api/files/content', (req, res) => {
+        try {
+            const fileData = fileBrowser.readFile(req.query.path || '');
+            res.json(fileData);
+        } catch (err) {
+            res.status(400).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/files/save', requireControlMode, (req, res) => {
+        const { path: filePath, content, baseHash } = req.body;
+        try {
+            const result = fileBrowser.writeFile(filePath, content, baseHash, req.session.deviceFingerprint);
+            res.json({ success: true, result });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    });
+
+    // Quick Actions
+    app.get('/api/quick-actions', (req, res) => {
+        res.json(quickActionRunner.listActions());
+    });
+
+    app.post('/api/quick-actions/:id/execute', requireControlMode, asyncRoute(async (req, res) => {
+        try {
+            const result = await quickActionRunner.executeAction(req.params.id, req.body?.params || {}, req.session);
+            res.json({ success: true, result });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    }));
+
+    // Image Upload
+    app.post('/api/upload-image', requireControlMode, express.raw({ type: ['image/*', 'application/octet-stream'], limit: '10mb' }), asyncRoute(async (req, res) => {
+        try {
+            const originalName = req.headers['x-file-name'] || 'image.png';
+            const uploadRes = await imageUploader.processAndSaveImage(req.body, originalName, req.session);
+            res.json({ success: true, ...uploadRes });
+        } catch (err) {
+            res.status(400).json({ success: false, error: err.message });
+        }
+    }));
+
+    // Static serve for uploads
+    app.use('/api/uploads', express.static(join(process.cwd(), '.quanta', 'uploads')));
+
+    // Devices & Controller Lock API
+    app.get('/api/devices', (req, res) => {
+        res.json(sessionManager.getConnectedDevices());
+    });
+
+    app.post('/api/devices/claim-controller', requireControlMode, (req, res) => {
+        const sessionId = req.session.id;
+        const result = sessionManager.claimController(sessionId, !!req.body.force);
+        res.json(result);
+    });
+
+    app.post('/api/devices/release-controller', (req, res) => {
+        const sessionId = req.session.id;
+        const released = sessionManager.releaseController(sessionId);
+        res.json({ success: released });
+    });
+
+    const requireDesktop = (req, res, next) => {
+        if (!canUseDemoLogin(req, true)) return res.status(403).json({ error: 'Use the local desktop to manage pairing' });
+        next();
+    };
+    app.get('/api/devices/pending', requireDesktop, (req, res) => res.json([...sessionManager.pendingDevices.values()]));
+    app.post('/api/devices/:fingerprint/approve', requireControlMode, requireDesktop, (req, res) => {
+        if (!sessionManager.pendingDevices.has(req.params.fingerprint)) return res.status(404).json({ error: 'Unknown pending device' });
+        sessionManager.approveDevice(req.params.fingerprint);
+        res.json({ success: true });
+    });
+    app.post('/api/devices/:fingerprint/revoke', requireControlMode, requireDesktop, (req, res) => {
+        sessionManager.revokeDevice(req.params.fingerprint);
+        res.json({ success: true });
+    });
+
+    // Webhooks & Plugins API
+    app.get('/api/webhooks', (req, res) => {
+        res.json(webhookDispatcher.webhooks.map(w => ({ url: w.url, events: w.events })));
+    });
+
+    app.post('/api/webhooks', requireControlMode, (req, res) => {
+        const { url, secret, events } = req.body;
+        webhookDispatcher.addWebhook({ url, secret, events });
+        res.json({ success: true });
+    });
+
+    app.get('/api/plugins', (req, res) => {
+        res.json(pluginHost.listPlugins());
     });
 
     // Get current snapshot
@@ -2079,6 +2472,11 @@ async function createServer() {
         });
     });
 
+    // Living styleguide endpoint (Ink & Paper)
+    app.get('/styleguide', (req, res) => {
+        res.sendFile(join(__dirname, 'public', 'styleguide.html'));
+    });
+
     // SSL status endpoint
     app.get('/ssl-status', (req, res) => {
         const keyPath = join(__dirname, 'certs', 'server.key');
@@ -2094,7 +2492,7 @@ async function createServer() {
     });
 
     // Generate SSL certificates endpoint
-    app.post('/generate-ssl', async (req, res) => {
+    app.post('/generate-ssl', asyncRoute(async (req, res) => {
         try {
             const { execSync } = await import('child_process');
             execSync('node generate_ssl.js', { cwd: __dirname, stdio: 'pipe' });
@@ -2108,86 +2506,44 @@ async function createServer() {
                 error: e.message
             });
         }
-    });
+    }));
 
     // Debug UI Endpoint
-    app.get('/debug-ui', async (req, res) => {
+    app.get('/debug-ui', asyncRoute(async (req, res) => {
         if (!cdpConnection) return res.status(503).json({ error: 'CDP not connected' });
         const uiTree = await inspectUI(cdpConnection);
         console.log('--- UI TREE ---');
         console.log(uiTree);
         console.log('---------------');
         res.type('json').send(uiTree);
-    });
+    }));
 
     // Set Mode
-    app.post('/set-mode', async (req, res) => {
+    app.post('/set-mode', requireControlMode, asyncRoute(async (req, res) => {
         const { mode } = req.body;
         if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
         const result = await setMode(cdpConnection, mode);
         res.json(result);
-    });
+    }));
 
     // Set Model
-    app.post('/set-model', async (req, res) => {
+    app.post('/set-model', requireControlMode, asyncRoute(async (req, res) => {
         const { model } = req.body;
         if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
         const result = await setModel(cdpConnection, model);
         res.json(result);
-    });
+    }));
 
     // Get Models list dynamically
-    app.get('/models', async (req, res) => {
+    app.get('/models', asyncRoute(async (req, res) => {
         if (!cdpConnection) return res.json({ models: [] });
         const modelsList = await getAvailableModels(cdpConnection);
         res.json({ models: modelsList });
-    });
+    }));
 
-    // Helper to parse multipart form data without any external dependencies (offline & network-safe)
-    function parseMultipart(req) {
-        return new Promise((resolve, reject) => {
-            const chunks = [];
-            req.on('data', chunk => chunks.push(chunk));
-            req.on('end', () => {
-                try {
-                    const buffer = Buffer.concat(chunks);
-                    const contentType = req.headers['content-type'];
-                    if (!contentType) return reject(new Error('No Content-Type header'));
-                    
-                    const boundaryMatch = contentType.match(/boundary=(.+)$/);
-                    if (!boundaryMatch) return reject(new Error('No boundary found'));
-                    const boundary = '--' + boundaryMatch[1];
-                    
-                    const boundaryBuffer = Buffer.from(boundary);
-                    const startIdx = buffer.indexOf(boundaryBuffer);
-                    if (startIdx === -1) return reject(new Error('Boundary start not found'));
-                    
-                    const headerEndBuffer = Buffer.from('\r\n\r\n');
-                    const headerStartIdx = startIdx + boundaryBuffer.length + 2; // skip boundary and CRLF
-                    const headerEndIdx = buffer.indexOf(headerEndBuffer, headerStartIdx);
-                    if (headerEndIdx === -1) return reject(new Error('Headers end not found'));
-                    
-                    const headerText = buffer.slice(headerStartIdx, headerEndIdx).toString('utf-8');
-                    const filenameMatch = headerText.match(/filename="([^"]+)"/);
-                    if (!filenameMatch) return reject(new Error('No filename found in headers'));
-                    const filename = filenameMatch[1];
-                    
-                    const endIdx = buffer.indexOf(boundaryBuffer, headerEndIdx + 4);
-                    if (endIdx === -1) return reject(new Error('Boundary end not found'));
-                    
-                    // Slice data (exclude boundaries and boundary-ending CRLF)
-                    const fileData = buffer.slice(headerEndIdx + 4, endIdx - 2);
-                    resolve({ filename, data: fileData });
-                } catch (err) {
-                    reject(err);
-                }
-            });
-            req.on('error', reject);
-        });
-    }
 
     // Upload file to the active workspace folder
-    app.post('/upload-file', async (req, res) => {
+    app.post('/upload-file', requireControlMode, asyncRoute(async (req, res) => {
         try {
             const { filename, data } = await parseMultipart(req);
             if (!filename || !data) {
@@ -2202,38 +2558,34 @@ async function createServer() {
                 }
             }
 
-            const path = require('path');
-            const fs = require('fs');
-            const downloadsDir = path.join(process.env.USERPROFILE || 'C:\\Users\\hshdh', 'Downloads');
-            const projectDir = path.join(downloadsDir, activeProject);
-
-            if (!fs.existsSync(projectDir)) {
-                fs.mkdirSync(projectDir, { recursive: true });
+            const sanitizedFilename = path.win32.basename(path.posix.basename(filename)).replace(/[^a-zA-Z0-9._-]/g, '_') || 'upload.bin';
+            const uploadDir = path.join(fileBrowser.workspaceRoot, '.quanta', 'attachments');
+            if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir, { recursive: true });
             }
-
-            const savePath = path.join(projectDir, filename);
-            fs.writeFileSync(savePath, data);
+            const savePath = path.join(uploadDir, `${randomUUID()}-${sanitizedFilename}`);
+            fs.writeFileSync(savePath, data, { flag: 'wx' });
 
             console.log(`📂 Mobile Upload: Saved file "${filename}" to workspace: "${savePath}"`);
             res.json({ success: true, filename, savedPath: savePath, project: activeProject });
         } catch (err) {
             console.error('File upload route error:', err);
-            res.status(500).json({ error: err.message });
+            res.status(err.status || 500).json({ error: err.message });
         }
-    });
+    }));
 
     // Stop Generation
-    app.post('/stop', async (req, res) => {
+    app.post('/stop', requireControlMode, asyncRoute(async (req, res) => {
         if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
         const result = await stopGeneration(cdpConnection);
         res.json(result);
-    });
+    }));
 
     // Send message
-    app.post('/send', async (req, res) => {
+    app.post('/send', requireControlMode, asyncRoute(async (req, res) => {
         const { message } = req.body;
 
-        if (!message) {
+        if (typeof message !== 'string' || !message.trim() || message.length > 100000) {
             return res.status(400).json({ error: 'Message required' });
         }
 
@@ -2250,10 +2602,10 @@ async function createServer() {
             method: result.method || 'attempted',
             details: result
         });
-    });
+    }));
 
     // UI Inspection endpoint - Returns all buttons as JSON for debugging
-    app.get('/ui-inspect', async (req, res) => {
+    app.get('/ui-inspect', asyncRoute(async (req, res) => {
         if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
 
         const EXP = `(() => {
@@ -2442,10 +2794,10 @@ async function createServer() {
         } catch (e) {
             res.status(500).json({ error: e.message, stack: e.stack });
         }
-    });
+    }));
 
     // Endpoint to list all CDP targets - helpful for debugging connection issues
-    app.get('/cdp-targets', async (req, res) => {
+    app.get('/cdp-targets', asyncRoute(async (req, res) => {
         const results = {};
         const portsList = findAntigravityPort();
         for (const port of portsList) {
@@ -2457,7 +2809,7 @@ async function createServer() {
             }
         }
         res.json(results);
-    });
+    }));
 
     // WebSocket connection with Auth check
     wss.on('connection', (ws, req) => {
@@ -2479,19 +2831,23 @@ async function createServer() {
         const signedToken = parsedCookies[AUTH_COOKIE_NAME];
         let isAuthenticated = false;
 
-        // Exempt local Wi-Fi devices from authentication
-        if (isLocalRequest(req)) {
+        // Exempt local Wi-Fi devices from authentication only if LAN auto-trust is enabled (Zero-Trust compliance)
+        if (sessionManager.allowLanAutoTrust && isLocalRequest(req)) {
             isAuthenticated = true;
         } else if (signedToken) {
-            const sessionSecret = process.env.SESSION_SECRET || 'antigravity_secret_key_1337';
+            const sessionSecret = SESSION_SECRET;
 
             if (sessionSecret === 'antigravity_secret_key_1337') {
                 // Warning already printed on startup, but we check here for token verification
             }
 
             const token = cookieParser.signedCookie(signedToken, sessionSecret);
-            if (token === AUTH_TOKEN) {
-                isAuthenticated = true;
+            if (token && token !== signedToken) {
+                const session = sessionManager.getSession(token);
+                if (session) {
+                    isAuthenticated = true;
+                    ws.session = session;
+                }
             }
         }
 
@@ -2503,6 +2859,7 @@ async function createServer() {
         }
 
         console.log('📱 Client connected (Authenticated)');
+        ws.isAuthenticated = true;
 
         // Keepalive ping to prevent tunnel proxies (Cloudflare/ngrok) from dropping idle connections
         ws.isAlive = true;
@@ -2516,6 +2873,9 @@ async function createServer() {
     // Server-side ping every 20s to keep WebSocket alive through tunnels
     const pingInterval = setInterval(() => {
         wss.clients.forEach(client => {
+            if (!client.isAuthenticated || (client.session && !sessionManager.getSession(client.session.id, false))) {
+                return client.close(1008, 'Unauthorized');
+            }
             if (client.isAlive === false) {
                 console.log('📱 Client timed out, terminating...');
                 return client.terminate();
@@ -2546,88 +2906,171 @@ async function main() {
         startPolling(wss);
 
         // Remote Click
-        app.post('/remote-click', async (req, res) => {
+        app.post('/remote-click', requireControlMode, asyncRoute(async (req, res) => {
             const { selector, index, textContent } = req.body;
+            if (!selector || typeof selector !== 'string') {
+                return res.status(400).json({ error: 'Selector must be a non-empty string' });
+            }
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await clickElement(cdpConnection, { selector, index, textContent });
             res.json(result);
-        });
+        }));
 
         // Remote Scroll - sync phone scroll to desktop
-        app.post('/remote-scroll', async (req, res) => {
+        app.post('/remote-scroll', requireControlMode, asyncRoute(async (req, res) => {
             const { scrollTop, scrollPercent } = req.body;
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await remoteScroll(cdpConnection, { scrollTop, scrollPercent });
             res.json(result);
-        });
+        }));
+
+        function computeDiskUsage(targetPath = process.cwd()) {
+            try {
+                if (typeof fs.statfsSync === 'function') {
+                    const stats = fs.statfsSync(targetPath);
+                    if (stats && stats.blocks > 0) {
+                        const total = stats.blocks * stats.bsize;
+                        const free = stats.bavail * stats.bsize;
+                        const used = total - free;
+                        return Math.min(100, Math.max(0, Math.round((used / total) * 100)));
+                    }
+                }
+            } catch (e) {}
+            return 0;
+        }
 
         // Get App State
-        app.get('/app-state', async (req, res) => {
-            if (!cdpConnection) return res.json({ mode: 'Unknown', model: 'Unknown' });
+        app.get('/app-state', asyncRoute(async (req, res) => {
+            const isTunnel = !isLocalRequest(req);
+            const tunnelStatus = tunnelSupervisor ? tunnelSupervisor.getCurrentStatus() : {};
+            let connectionType = 'LAN';
+            if (isTunnel) {
+                const providerName = tunnelStatus.provider ? (tunnelStatus.provider.charAt(0).toUpperCase() + tunnelStatus.provider.slice(1)) : 'External';
+                connectionType = `Tunnel (${providerName})`;
+            }
+
+            let telemetry = { cpuPercent: 0, memoryUsedGB: '0.0', memoryTotalGB: '0.0', memoryPercent: 0, diskPercent: computeDiskUsage() };
+            try {
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const totalMemGB = (totalMem / (1024 ** 3)).toFixed(1);
+                const usedMemGB = (usedMem / (1024 ** 3)).toFixed(1);
+                const memPercent = Math.round((usedMem / totalMem) * 100);
+                const cpus = os.cpus() || [];
+                let totalIdle = 0, totalTick = 0;
+                cpus.forEach(cpu => {
+                    for (const type in cpu.times) totalTick += cpu.times[type];
+                    totalIdle += cpu.times.idle;
+                });
+                const idle = totalIdle / (cpus.length || 1);
+                const total = totalTick / (cpus.length || 1);
+                const cpuPercent = total > 0 ? Math.min(100, Math.max(0, Math.round((1 - (idle / total)) * 100))) : 0;
+                telemetry = { cpuPercent, memoryUsedGB: usedMemGB, memoryTotalGB: totalMemGB, memoryPercent: memPercent, diskPercent: computeDiskUsage() };
+            } catch (e) {}
+
+            if (!cdpConnection) {
+                return res.json({
+                    cdpConnected: false,
+                    mode: 'Standby',
+                    model: 'Antigravity (Local)',
+                    project: 'quanta-ide',
+                    telemetry,
+                    connectionType
+                });
+            }
             const result = await getAppState(cdpConnection);
-            res.json(result);
+            res.json(Object.assign({ cdpConnected: true, project: 'quanta-ide', telemetry, connectionType }, result));
+        }));
+
+        app.get('/api/system-telemetry', (req, res) => {
+            try {
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const totalMemGB = (totalMem / (1024 ** 3)).toFixed(1);
+                const usedMemGB = (usedMem / (1024 ** 3)).toFixed(1);
+                const memPercent = Math.round((usedMem / totalMem) * 100);
+                const cpus = os.cpus() || [];
+                let totalIdle = 0, totalTick = 0;
+                cpus.forEach(cpu => {
+                    for (const type in cpu.times) totalTick += cpu.times[type];
+                    totalIdle += cpu.times.idle;
+                });
+                const idle = totalIdle / (cpus.length || 1);
+                const total = totalTick / (cpus.length || 1);
+                const cpuPercent = total > 0 ? Math.min(100, Math.max(0, Math.round((1 - (idle / total)) * 100))) : 0;
+                res.json({ cpuPercent, memoryUsedGB: usedMemGB, memoryTotalGB: totalMemGB, memoryPercent: memPercent, diskPercent: computeDiskUsage() });
+            } catch (e) {
+                res.status(503).json({ error: 'System telemetry unavailable' });
+            }
         });
 
         // Start New Chat
-        app.post('/new-chat', async (req, res) => {
+        app.post('/new-chat', requireControlMode, asyncRoute(async (req, res) => {
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await startNewChat(cdpConnection);
             res.json(result);
-        });
+        }));
 
         // Get Chat History
-        app.get('/chat-history', async (req, res) => {
+        app.get('/chat-history', asyncRoute(async (req, res) => {
             if (!cdpConnection) return res.json({ error: 'CDP disconnected', chats: [] });
             const result = await getChatHistory(cdpConnection);
             res.json(result);
-        });
+        }));
 
         // Select a Chat
-        app.post('/select-chat', async (req, res) => {
+        app.post('/select-chat', requireControlMode, asyncRoute(async (req, res) => {
             const { title } = req.body;
             if (!title) return res.status(400).json({ error: 'Chat title required' });
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await selectChat(cdpConnection, title);
             res.json(result);
-        });
+        }));
 
         // Close Chat History
-        app.post('/close-history', async (req, res) => {
+        app.post('/close-history', requireControlMode, asyncRoute(async (req, res) => {
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await closeHistory(cdpConnection);
             res.json(result);
-        });
+        }));
 
         // Check if Chat is Open
-        app.get('/chat-status', async (req, res) => {
+        app.get('/chat-status', asyncRoute(async (req, res) => {
             if (!cdpConnection) return res.json({ hasChat: false, hasMessages: false, editorFound: false });
             const result = await hasChatOpen(cdpConnection);
             res.json(result);
-        });
+        }));
 
         // Get list of projects/workspaces
-        app.get('/projects', async (req, res) => {
+        app.get('/projects', asyncRoute(async (req, res) => {
             if (!cdpConnection) return res.json({ error: 'CDP disconnected', projects: [] });
             const result = await getProjects(cdpConnection);
             res.json({ projects: result });
-        });
+        }));
 
         // Select a project/workspace
-        app.post('/select-project', async (req, res) => {
+        app.post('/select-project', requireControlMode, asyncRoute(async (req, res) => {
             const { project } = req.body;
             if (!project) return res.status(400).json({ error: 'Project name required' });
             if (!cdpConnection) return res.status(503).json({ error: 'CDP disconnected' });
             const result = await selectProject(cdpConnection, project);
             res.json(result);
-        });
+        }));
 
-        // Kill any existing process on the port before starting
-        await killPortProcess(SERVER_PORT);
+        app.use(apiErrorHandler);
 
         // Start server
         const localIP = getLocalIP();
         const protocol = hasSSL ? 'https' : 'http';
-        server.listen(SERVER_PORT, '0.0.0.0', () => {
+        server.on('error', (error) => {
+            console.error(error.code === 'EADDRINUSE'
+                ? `Port ${SERVER_PORT} is already in use. Stop the existing server or configure another PORT.`
+                : `Server failed: ${error.message}`);
+            process.exit(1);
+        });
+        server.listen(SERVER_PORT, process.env.HOST || '0.0.0.0', () => {
             console.log(`🚀 Server running on ${protocol}://${localIP}:${SERVER_PORT}`);
             if (hasSSL) {
                 console.log(`💡 First time on phone? Accept the security warning to proceed.`);

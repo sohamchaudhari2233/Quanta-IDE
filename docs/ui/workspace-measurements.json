@@ -1,0 +1,167 @@
+[
+  {
+    "controls": [
+      {
+        "height": 44,
+        "id": "newChatBtn",
+        "left": 122,
+        "right": 166,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "historyBtn",
+        "left": 170,
+        "right": 214,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "refreshBtn",
+        "left": 218,
+        "right": 262,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "moreOptionsBtn",
+        "left": 266,
+        "right": 310,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "sendBtn",
+        "left": 251,
+        "right": 295,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "attachBtn",
+        "left": 25,
+        "right": 69,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "btnVoiceInput",
+        "left": 203,
+        "right": 247,
+        "width": 44
+      }
+    ],
+    "pageWidth": 320,
+    "width": 320
+  },
+  {
+    "controls": [
+      {
+        "height": 44,
+        "id": "newChatBtn",
+        "left": 485.3125,
+        "right": 602,
+        "width": 116.6875
+      },
+      {
+        "height": 44,
+        "id": "historyBtn",
+        "left": 608,
+        "right": 652,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "refreshBtn",
+        "left": 658,
+        "right": 702,
+        "width": 44
+      },
+      {
+        "height": 44,
+        "id": "moreOptionsBtn",
+        "left": 708,
+        "right": 752,
+        "width": 44
+      },
+      {
+        "height": 48,
+        "id": "sendBtn",
+        "left": 693,
+        "right": 741,
+        "width": 48
+      },
+      {
+        "height": 48,
+        "id": "attachBtn",
+        "left": 27,
+        "right": 75,
+        "width": 48
+      },
+      {
+        "height": 48,
+        "id": "btnVoiceInput",
+        "left": 639,
+        "right": 687,
+        "width": 48
+      }
+    ],
+    "pageWidth": 768,
+    "width": 768
+  },
+  {
+    "controls": [
+      {
+        "height": 46,
+        "id": "newChatBtn",
+        "left": 643.171875,
+        "right": 767.859375,
+        "width": 124.6875
+      },
+      {
+        "height": 46,
+        "id": "historyBtn",
+        "left": 775.859375,
+        "right": 888,
+        "width": 112.140625
+      },
+      {
+        "height": 46,
+        "id": "refreshBtn",
+        "left": 896,
+        "right": 942,
+        "width": 46
+      },
+      {
+        "height": 46,
+        "id": "moreOptionsBtn",
+        "left": 950,
+        "right": 996,
+        "width": 46
+      },
+      {
+        "height": 48,
+        "id": "sendBtn",
+        "left": 937,
+        "right": 985,
+        "width": 48
+      },
+      {
+        "height": 48,
+        "id": "attachBtn",
+        "left": 255,
+        "right": 303,
+        "width": 48
+      },
+      {
+        "height": 48,
+        "id": "btnVoiceInput",
+        "left": 883,
+        "right": 931,
+        "width": 48
+      }
+    ],
+    "pageWidth": 1024,
+    "width": 1024
+  }
+]

@@ -1,5 +1,11 @@
 node_modules
 src
+test
 .vscode-test
 *.config.js
 tsconfig.json
+.env
+.env*
+!.env.example
+client_secret*.json
+*.vsix

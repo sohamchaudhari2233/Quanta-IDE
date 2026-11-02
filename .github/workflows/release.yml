@@ -1,0 +1,54 @@
+name: Quanta IDE Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Install and Build PC Extension
+        run: |
+          cd Quanta-PC-Extension
+          npm ci
+          npm run compile
+          npx @vscode/vsce package --out ../quanta-pc-extension.vsix
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: quanta-pc-extension.vsix
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      # Optional Marketplace Publishing (Requires repository secrets)
+      # - name: Publish to VS Code Marketplace
+      #   if: env.VSCE_PAT != ''
+      #   env:
+      #     VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      #   run: |
+      #     cd Quanta-PC-Extension
+      #     npx @vscode/vsce publish -p ${{ secrets.VSCE_PAT }}
+
+      # - name: Publish to Open VSX Registry
+      #   if: env.OVSX_PAT != ''
+      #   env:
+      #     OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      #   run: |
+      #     cd Quanta-PC-Extension
+      #     npx ovsx publish ../quanta-pc-extension.vsix -p ${{ secrets.OVSX_PAT }}
+

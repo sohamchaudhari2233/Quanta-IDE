@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Quanta IDE — "Ink & Paper" Living Styleguide</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .styleguide-body {
+            overflow-y: auto !important;
+            padding: 32px 20px;
+            display: block !important;
+        }
+
+        .sg-container {
+            max-width: 860px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        .sg-section {
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: var(--radius-sm);
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .sg-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .token-swatch {
+            width: 80px;
+            height: 60px;
+            border-radius: var(--radius-xs);
+            border: 1px solid var(--rule-strong);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            padding: 4px 6px;
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .diff-view {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            border: 1px solid var(--rule);
+            background: var(--surface-sunken);
+            border-radius: var(--radius-xs);
+            padding: 8px 12px;
+            line-height: 1.5;
+        }
+
+        .diff-added {
+            color: var(--ok);
+            background: var(--ok-subtle);
+        }
+
+        .diff-removed {
+            color: var(--signal);
+            background: var(--signal-subtle);
+        }
+    </style>
+</head>
+
+<body class="styleguide-body">
+    <div class="sg-container">
+        <header style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--text); padding-bottom: 14px;">
+            <div>
+                <h1 style="font-size: 2rem;">Ink & Paper — Design System Styleguide</h1>
+                <p style="color: var(--text-2); font-size: 13.5px; margin-top: 4px;">Quanta IDE Living Component QA & Verification Surface</p>
+            </div>
+            <div style="display: flex; gap: 6px;">
+                <button class="btn btn-secondary" onclick="setTheme('paper')">Paper</button>
+                <button class="btn btn-secondary" onclick="setTheme('graphite')">Graphite</button>
+                <button class="btn btn-secondary" onclick="setTheme('ink')">Ink (OLED)</button>
+            </div>
+        </header>
+
+        <!-- 1. Color Tokens -->
+        <section class="sg-section">
+            <h2 class="serif-heading">1. Color Tokens & Semantic Surfaces</h2>
+            <div class="sg-row">
+                <div class="token-swatch" style="background: var(--bg); color: var(--text);">--bg</div>
+                <div class="token-swatch" style="background: var(--surface); color: var(--text);">--surface</div>
+                <div class="token-swatch" style="background: var(--surface-sunken); color: var(--text);">--sunken</div>
+                <div class="token-swatch" style="background: var(--surface-raised); color: var(--text);">--raised</div>
+                <div class="token-swatch" style="background: var(--text); color: var(--bg);">--text</div>
+                <div class="token-swatch" style="background: var(--signal); color: #fff;">--signal</div>
+                <div class="token-swatch" style="background: var(--ok); color: #fff;">--ok</div>
+                <div class="token-swatch" style="background: var(--caution); color: #fff;">--caution</div>
+                <div class="token-swatch" style="background: var(--info); color: #fff;">--info</div>
+            </div>
+        </section>
+
+        <!-- 2. Typography -->
+        <section class="sg-section">
+            <h2 class="serif-heading">2. Typography Hierarchy (Serif, Sans, Mono & Indic)</h2>
+            <h1>Heading 1 — The Master Inscription (Literata Serif)</h1>
+            <h2>Heading 2 — Section Ledger Divisor</h2>
+            <p style="font-size: 14px; color: var(--text);">UI Body Sans: Crisp humanist sans-serif with natural editorial rhythm and full support for Hinglish, Hindi, and Odia strings without diacritic clipping: <span style="font-weight: 500;">नमस्ते दुनिया • କ୍ୱାଣ୍ଟା ଆଇଡିଇ</span>.</p>
+            <p class="ledger-label">Small Caps Ledger Subtitle & Metadata Tag</p>
+            <div class="code-box">
+                // Mono: Precise monospace without ligatures in terminal contexts
+                const agent = new AutonomousAgent({ securityPolicy: 'zero-trust' });
+                await agent.execute('git status --porcelain');
+            </div>
+        </section>
+
+        <!-- 3. Button Archetypes & Hold-to-Confirm -->
+        <section class="sg-section">
+            <h2 class="serif-heading">3. Button Primitives & Hold-to-Confirm</h2>
+            <div class="sg-row">
+                <button class="btn btn-primary">Primary (Solid Ink)</button>
+                <button class="btn btn-secondary">Secondary (Hairline)</button>
+                <button class="btn btn-tertiary">Tertiary (Text)</button>
+                <button class="btn btn-danger">Danger Action</button>
+                <button class="btn btn-hold-confirm" id="demoHoldBtn">
+                    <span class="hold-progress" id="demoHoldProgress"></span>
+                    <span>Hold 900ms to Confirm</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- 4. Status Primitives & Stamp Badges -->
+        <section class="sg-section">
+            <h2 class="serif-heading">4. Status Primitives & Stamp Badges</h2>
+            <div class="sg-row">
+                <div class="connection-badge">
+                    <span class="connection-dot online"></span>
+                    <span>Connected · LAN</span>
+                </div>
+                <div class="connection-badge">
+                    <span class="connection-dot offline"></span>
+                    <span>Offline · Queue Active</span>
+                </div>
+                <div class="mode-chip">Mode: Read-only</div>
+                <div class="mode-chip control">Mode: Control Active</div>
+                <span class="stamp-badge stamp-safe">✓ Safe</span>
+                <span class="stamp-badge stamp-caution">▲ Caution</span>
+                <span class="stamp-badge stamp-dangerous">■ Dangerous</span>
+            </div>
+        </section>
+
+        <!-- 5. Ledger Key-Value Pairs -->
+        <section class="sg-section">
+            <h2 class="serif-heading">5. Ledger Key-Value Structure</h2>
+            <div class="ledger-list">
+                <div class="ledger-row">
+                    <span class="ledger-key">Session ID</span>
+                    <span class="ledger-leader"></span>
+                    <span class="ledger-val">ses_8829f0a</span>
+                </div>
+                <div class="ledger-row">
+                    <span class="ledger-key">Target Device</span>
+                    <span class="ledger-leader"></span>
+                    <span class="ledger-val">Pixel 8 Pro (Authorized)</span>
+                </div>
+                <div class="ledger-row">
+                    <span class="ledger-key">Google Drive Workspace</span>
+                    <span class="ledger-leader"></span>
+                    <span class="ledger-val">Synced 2m ago</span>
+                </div>
+                <div class="ledger-row">
+                    <span class="ledger-key">Security Mode</span>
+                    <span class="ledger-leader"></span>
+                    <span class="ledger-val">Control (Elevated)</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. Diff View -->
+        <section class="sg-section">
+            <h2 class="serif-heading">6. Unified Diff View</h2>
+            <div class="diff-view">
+                <div>@@ -42,6 +42,8 @@ export function authenticate()</div>
+                <div class="diff-removed">- const preferredPort = config.get('oauthPort', 0);</div>
+                <div class="diff-added">+ const preferredPort = config.get('oauthPort', 8085);</div>
+                <div class="diff-added">+ const preferredHost = config.get('oauthHost', 'localhost');</div>
+                <div>  server.listen(preferredPort, '127.0.0.1');</div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function setTheme(t) {
+            document.documentElement.setAttribute('data-theme', t);
+            localStorage.setItem('quanta_theme', t);
+        }
+
+        // Hold-to-confirm demonstration
+        const holdBtn = document.getElementById('demoHoldBtn');
+        let holdTimer = null;
+        if (holdBtn) {
+            const startHold = () => {
+                holdBtn.classList.add('holding');
+                holdTimer = setTimeout(() => {
+                    alert('Hold-to-confirm action triggered successfully!');
+                    holdBtn.classList.remove('holding');
+                }, 900);
+            };
+            const cancelHold = () => {
+                holdBtn.classList.remove('holding');
+                if (holdTimer) clearTimeout(holdTimer);
+            };
+            holdBtn.addEventListener('mousedown', startHold);
+            holdBtn.addEventListener('mouseup', cancelHold);
+            holdBtn.addEventListener('mouseleave', cancelHold);
+            holdBtn.addEventListener('touchstart', startHold);
+            holdBtn.addEventListener('touchend', cancelHold);
+        }
+    </script>
+</body>
+
+</html>
+

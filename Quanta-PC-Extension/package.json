@@ -2,7 +2,12 @@
   "name": "quanta-pc-extension",
   "displayName": "Quanta PC Extension",
   "description": "Connects local VS Code with Quanta IDE on Google Drive",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "publisher": "quanta-ide",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dark-yoddha/Quanta-IDE.git"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -14,6 +19,14 @@
   "contributes": {
     "commands": [
       {
+        "command": "quanta.login",
+        "title": "Quanta: Connect Google Drive"
+      },
+      {
+        "command": "quanta.logout",
+        "title": "Quanta: Disconnect Google Drive"
+      },
+      {
         "command": "quanta.push",
         "title": "Quanta: Push to Google Drive"
       },
@@ -22,8 +35,20 @@
         "title": "Quanta: Pull from Google Drive"
       },
       {
+        "command": "quanta.preview",
+        "title": "Quanta: Preview Sync Changes"
+      },
+      {
         "command": "quanta.syncChats",
         "title": "Quanta: Sync Antigravity Chats"
+      },
+      {
+        "command": "quanta.doctor",
+        "title": "Quanta: Run System Doctor"
+      },
+      {
+        "command": "quanta.updateExtension",
+        "title": "Quanta: Update Extension (Pull Latest)"
       }
     ],
     "viewsContainers": {
@@ -56,6 +81,85 @@
           "type": "string",
           "default": "",
           "description": "Google Drive OAuth Client Secret"
+        },
+        "quanta.oauthPort": {
+          "type": "number",
+          "default": 8085,
+          "description": "Port used for the Google OAuth 2.0 loopback callback. Default is 8085. Add http://localhost:8085 and http://127.0.0.1:8085 to your Google Cloud Console Authorized Redirect URIs."
+        },
+        "quanta.oauthHost": {
+          "type": "string",
+          "enum": [
+            "localhost",
+            "127.0.0.1"
+          ],
+          "default": "localhost",
+          "description": "Host used for the OAuth redirect URI (localhost or 127.0.0.1)."
+        },
+        "quanta.oauthPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional subpath for the OAuth redirect URI (leave empty for standard Google Desktop app loopback, e.g. http://localhost:<port>)."
+        },
+        "quanta.oauthRedirectUri": {
+          "type": "string",
+          "default": "",
+          "description": "Optional override for the entire OAuth redirect URI (e.g. http://localhost:3000/oauth2callback). Overrides oauthHost, oauthPort, and oauthPath when set."
+        },
+        "quanta.driveScope": {
+          "type": "string",
+          "enum": [
+            "drive.file",
+            "drive"
+          ],
+          "default": "drive.file",
+          "description": "Google Drive OAuth scope (drive.file restricts to Quanta-managed files; drive grants full access)"
+        },
+        "quanta.conflictPolicy": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "keepLocal",
+            "keepRemote",
+            "keepBoth"
+          ],
+          "default": "ask",
+          "description": "Default conflict resolution policy when both local and remote have changed"
+        },
+        "quanta.deleteThreshold": {
+          "type": "number",
+          "default": 20,
+          "description": "Maximum number of files allowed for automatic orphan deletion without extra confirmation"
+        },
+        "quanta.deletePercentageThreshold": {
+          "type": "number",
+          "default": 30,
+          "description": "Maximum percentage of workspace tree allowed for deletion without confirmation"
+        },
+        "quanta.autoSync": {
+          "type": "string",
+          "enum": [
+            "off",
+            "onSave",
+            "interval"
+          ],
+          "default": "off",
+          "description": "Automatic synchronization mode"
+        },
+        "quanta.autoSyncInterval": {
+          "type": "number",
+          "default": 300,
+          "description": "Interval in seconds for periodic auto-sync when enabled"
+        },
+        "quanta.encryption.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable client-side AES-256-GCM encryption for chat transcripts"
+        },
+        "quanta.syncConcurrency": {
+          "type": "number",
+          "default": 10,
+          "description": "Number of concurrent file uploads/downloads during sync"
         }
       }
     }
@@ -66,7 +170,8 @@
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "test-compile": "tsc -p .",
-    "test-watch": "tsc -p . -w"
+    "test-watch": "tsc -p . -w",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "18.x",
@@ -75,8 +180,5 @@
     "typescript": "^5.1.3",
     "webpack": "^5.88.2",
     "webpack-cli": "^5.1.4"
-  },
-  "dependencies": {
-    "googleapis": "^126.0.1"
   }
 }

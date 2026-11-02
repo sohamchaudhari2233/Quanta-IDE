@@ -1,0 +1,23 @@
+{
+  "name": "Quanta Remote Control",
+  "short_name": "Quanta",
+  "description": "Real-Time Mobile Monitor and Remote Control for Quanta IDE & Antigravity AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1A1A19",
+  "theme_color": "#1A1A19",
+  "icons": [
+    {
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/antigravity.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

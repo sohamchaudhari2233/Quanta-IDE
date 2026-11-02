@@ -1,0 +1,201 @@
+/* ==========================================================================
+   QUANTA IDE — INK & PAPER DESIGN SYSTEM TOKENS
+   Semantic CSS Custom Properties for Paper (Light), Graphite (Dark), and Ink (OLED)
+   ========================================================================== */
+
+:root,
+[data-theme="paper"] {
+    color-scheme: light;
+
+    /* Base Surfaces */
+    --bg: #F3EEE3;
+    --surface: #FBF8F1;
+    --surface-sunken: #EAE4D6;
+    --surface-raised: #FFFDF8;
+    --surface-border: #D9D1BF;
+
+    /* Typography & Ink */
+    --text: #1F1D1A;
+    --text-2: #5C574E;
+    --text-3: #847E72;
+    --text-inv: #FBF8F1;
+
+    /* Hairline Rules */
+    --rule: #D9D1BF;
+    --rule-strong: #B9AF98;
+    --rule-dashed: 1px dashed #D9D1BF;
+
+    /* Signals & Semantic Status (Ink on Paper) */
+    --signal: #B8402A;           /* Vermilion for danger, stop, alert */
+    --signal-subtle: rgba(184, 64, 42, 0.12);
+    --signal-text: #8E2B17;
+
+    --ok: #4F6B3A;               /* Muted moss */
+    --ok-subtle: rgba(79, 107, 58, 0.12);
+    --ok-text: #374E25;
+
+    --caution: #9A6B14;          /* Warm ochre */
+    --caution-subtle: rgba(154, 107, 20, 0.12);
+    --caution-text: #765008;
+
+    --info: #2F4A6B;             /* Editorial ink blue */
+    --info-subtle: rgba(47, 74, 107, 0.12);
+    --info-text: #1E334D;
+
+    /* Primary Accent (Ink fill on Paper) */
+    --accent: #1F1D1A;
+    --accent-hover: #38342E;
+    --accent-contrast: #FBF8F1;
+
+    /* Gold & Warm Metallic Accents (Editorial Asian Ink & Paper) */
+    --gold-accent: #9A6B14;
+    --gold-gradient: linear-gradient(135deg, #DEAA48 0%, #B88220 100%);
+    --gold-gradient-hover: linear-gradient(135deg, #E6BA62 0%, #C9932E 100%);
+    --gold-glow: 0 0 14px rgba(154, 107, 20, 0.20);
+    --gold-border: rgba(154, 107, 20, 0.28);
+    --gold-border-strong: rgba(154, 107, 20, 0.55);
+    --panel-bg: rgba(251, 248, 241, 0.76);
+    --panel-card-bg: rgba(245, 239, 228, 0.82);
+    --panel-blur: blur(12px);
+
+    /* Authentic Background Artwork */
+    --bg-artwork: url('../assets/bg-paper.png');
+    --bg-tint: rgba(243, 238, 227, 0.30);
+
+    /* Elevation & Shadows (Subtle Paper Lift) */
+    --shadow-paper: 0 1px 3px rgba(31, 29, 26, 0.05), 0 4px 12px rgba(31, 29, 26, 0.04);
+    --shadow-float: 0 10px 28px -6px rgba(31, 29, 26, 0.12);
+
+    /* Radii & Metrics (Restrained Geometry) */
+    --radius-xs: 2px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-sheet: 12px 12px 0 0;
+}
+
+[data-theme="graphite"] {
+    color-scheme: dark;
+
+    /* Base Surfaces */
+    --bg: #1A1A19;
+    --surface: #222221;
+    --surface-sunken: #161615;
+    --surface-raised: #2A2A28;
+    --surface-border: #3A3935;
+
+    /* Typography & Ink */
+    --text: #E9E5DA;
+    --text-2: #A9A498;
+    --text-3: #7C786E;
+    --text-inv: #1A1A19;
+
+    /* Hairline Rules */
+    --rule: #3A3935;
+    --rule-strong: #55534C;
+    --rule-dashed: 1px dashed #3A3935;
+
+    /* Signals & Semantic Status */
+    --signal: #E0705A;
+    --signal-subtle: rgba(224, 112, 90, 0.15);
+    --signal-text: #F29A87;
+
+    --ok: #8DB071;
+    --ok-subtle: rgba(141, 176, 113, 0.15);
+    --ok-text: #B4D39B;
+
+    --caution: #D9A441;
+    --caution-subtle: rgba(217, 164, 65, 0.15);
+    --caution-text: #F3CA7E;
+
+    --info: #86A4C9;
+    --info-subtle: rgba(134, 164, 201, 0.15);
+    --info-text: #B2CBE8;
+
+    /* Primary Accent (Bone on Graphite) */
+    --accent: #E9E5DA;
+    --accent-hover: #FFFFFF;
+    --accent-contrast: #1A1A19;
+
+    /* Gold & Warm Metallic Accents (Image 2 Ultra-Premium Fidelity) */
+    --gold-accent: #E6C594;
+    --gold-gradient: linear-gradient(135deg, #F3D9A8 0%, #D8AA64 100%);
+    --gold-gradient-hover: linear-gradient(135deg, #FBE5BD 0%, #E2BA77 100%);
+    --gold-glow: 0 0 20px rgba(216, 170, 100, 0.32);
+    --gold-border: rgba(217, 164, 65, 0.32);
+    --gold-border-strong: rgba(217, 164, 65, 0.65);
+    --panel-bg: rgba(22, 16, 14, 0.48);
+    --panel-card-bg: rgba(28, 20, 16, 0.58);
+    --panel-blur: blur(14px);
+
+    /* Authentic Background Artwork */
+    --bg-artwork: url('../assets/bg-graphite.png');
+    --bg-tint: rgba(18, 14, 12, 0.14);
+
+    /* Elevation & Shadows (Tone-Driven Depth) */
+    --shadow-paper: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-float: 0 12px 32px -4px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="ink"] {
+    color-scheme: dark;
+
+    /* Base Surfaces (True OLED Black) */
+    --bg: #0B0B0A;
+    --surface: #121211;
+    --surface-sunken: #070706;
+    --surface-raised: #1A1A18;
+    --surface-border: #2A2926;
+
+    /* Typography & Ink */
+    --text: #ECE8DE;
+    --text-2: #A39E92;
+    --text-3: #77736A;
+    --text-inv: #0B0B0A;
+
+    /* Hairline Rules */
+    --rule: #2A2926;
+    --rule-strong: #3E3C37;
+    --rule-dashed: 1px dashed #2A2926;
+
+    /* Signals & Semantic Status */
+    --signal: #E8785F;
+    --signal-subtle: rgba(232, 120, 95, 0.16);
+    --signal-text: #F5A290;
+
+    --ok: #93B677;
+    --ok-subtle: rgba(147, 182, 119, 0.16);
+    --ok-text: #BCDCA4;
+
+    --caution: #DEAA48;
+    --caution-subtle: rgba(222, 170, 72, 0.16);
+    --caution-text: #F7D48D;
+
+    --info: #8BA9CE;
+    --info-subtle: rgba(139, 169, 206, 0.16);
+    --info-text: #B9D2F0;
+
+    /* Primary Accent */
+    --accent: #ECE8DE;
+    --accent-hover: #FFFFFF;
+    --accent-contrast: #0B0B0A;
+
+    /* Gold & Warm Metallic Accents (Ink OLED) */
+    --gold-accent: #E6C594;
+    --gold-gradient: linear-gradient(135deg, #F3D9A8 0%, #D8AA64 100%);
+    --gold-gradient-hover: linear-gradient(135deg, #FBE5BD 0%, #E2BA77 100%);
+    --gold-glow: none;
+    --gold-border: rgba(217, 164, 65, 0.28);
+    --gold-border-strong: rgba(217, 164, 65, 0.5);
+    --panel-bg: #0B0B0A;
+    --panel-card-bg: #121211;
+    --panel-blur: none;
+
+    /* Background (Pure Black for battery saving) */
+    --bg-artwork: none;
+    --bg-tint: transparent;
+
+    --shadow-paper: none;
+    --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.8);
+}
+

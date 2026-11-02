@@ -1,0 +1,63 @@
+name: Quanta IDE CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [ 24.x ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: |
+            Quanta-PC-Extension/package-lock.json
+            Remote-Control/package-lock.json
+
+      # 1. Quanta PC Extension
+      - name: Install PC Extension Dependencies
+        run: |
+          cd Quanta-PC-Extension
+          npm ci
+
+      - name: Compile PC Extension
+        run: |
+          cd Quanta-PC-Extension
+          npm run compile
+
+      - name: Run PC Extension Tests
+        run: |
+          cd Quanta-PC-Extension
+          npm test
+
+      # 2. Quanta Remote Control
+      - name: Install Remote Control Dependencies
+        run: |
+          cd Remote-Control
+          npm ci
+
+      - name: Run Remote Control Tests
+        run: |
+          cd Remote-Control
+          npm test
+
+      - name: Run Quanta Doctor
+        run: |
+          cd Remote-Control
+          npm run doctor || true
+
+      - name: Run Scenario Tests
+        run: npm run test:scenarios
+
