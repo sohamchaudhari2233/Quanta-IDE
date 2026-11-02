@@ -25,6 +25,11 @@ export class FileBrowser {
   }
 
   resolveSafePath(relativePath = '') {
+    if (typeof relativePath !== 'string' || path.win32.isAbsolute(relativePath) || path.posix.isAbsolute(relativePath) || relativePath.includes('\0')) {
+      throw new Error('Path traversal rejected: A relative workspace path is required');
+    }
+    // Apply the same separator rules on Windows and Linux hosts.
+    relativePath = relativePath.replace(/\\/g, '/');
     const resolved = path.resolve(this.workspaceRoot, relativePath);
 
     const isOutside = (root, target) => {
